@@ -1,0 +1,279 @@
+
+
+```{r}
+
+if (!require(librarian)){
+  install.packages("librarian")
+  library(librarian)
+}
+
+# librarian downloads, if not already downloaded, and reads in needed packages
+librarian::shelf(tidyverse, here, DBI, odbc)
+
+```
+
+```{r}
+
+### Connect to `ENTERPRISE` Database
+tryCatch({
+    db_connection <- DBI::dbConnect(odbc::odbc(),
+                             Driver="SnowflakeDSIIDriver",
+                             Server="hawaiianair.west-us-2.azure.snowflakecomputing.com",
+                             WAREHOUSE="DATA_LAKE_READER",
+                             Database="ENTERPRISE",
+                             UID= Sys.getenv("UID"), # <- remove "Sys.getenv("UID")" and enter "your email"
+                             authenticator = "externalbrowser")
+    print("Database Connected!")
+    },
+    error=function(cond) {
+            print("Unable to connect to Database.")
+})
+
+
+
+
+# Set search_path
+dbExecute(db_connection, "USE SCHEMA CREW_ANALYTICS")
+
+```
+
+```{r}
+
+
+fetch_data <- function(query, var_name) {
+  if (!exists(var_name, envir = .GlobalEnv)) {
+    assign(var_name, dbGetQuery(db_connection, query), envir = .GlobalEnv)
+    message(paste("Data fetched and stored in", var_name))
+  } else {
+    message(paste(var_name, "already exists. Skipping database query."))
+  }
+}
+
+
+
+```
+
+
+## Flight History
+```{r}
+
+q_flighthistory <- "SELECT *
+                    FROM CT_FLIGHT_HISTORY WHERE FLIGHT_DATE BETWEEN '2019-01-01' AND '2024-09-23';"
+
+fetch_data(q_flighthistory, "view_flighthistory")
+
+
+# Unique flight history for that date
+clean_flighthistory <- view_flighthistory %>%
+  filter(SEGMENT_STATUS == "A") %>% 
+  #select(c(2:10), (12:13), (55:59),EQUIPMENT) %>% # commen out
+  #filter(!duplicated(UNIQUE_ID)) %>% 
+  rename(SCHED_DEPARTURE_TIME = SCHED_DEPARTURE_TIME_RAW)%>% 
+  mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep= " ")) %>% 
+  group_by(FLIGHT_NO, FLIGHT_DATE, DEPARTING_CITY, ARRIVAL_CITY, SCHED_DEPARTURE_TIME) %>% 
+  filter(updated_dt == max(updated_dt)) %>% 
+  mutate(temp_id = cur_group_id()) %>% 
+  filter(!duplicated(temp_id)) #%>% 
+  # select(!c(12:16)) %>% # comment out
+  # select(!c(5:7)) %>%  # comment out
+  # select(!c(10:11)) # comment out
+
+rm(view_flighthistory)
+gc()
+
+```
+
+## Flight leg
+```{r}
+
+q_flightleg <- "SELECT *
+                FROM CT_FLIGHT_LEG WHERE PAIRING_DATE BETWEEN '2018-12-25' AND '2024-09-23';"
+
+fetch_data(q_flightleg, "view_flightleg")
+
+
+flight_leg_join <-  view_flightleg %>% 
+  mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep= " "),
+         shed_dept_hour = hour(SCHED_DEPARTURE_TIME),
+         DEADHEAD = if_else(is.na(DEADHEAD), "C", DEADHEAD)) %>%
+  relocate(updated_dt, .after=PAIRING_NO) %>%
+  group_by(PAIRING_POSITION,
+           DEPARTING_CITY,
+           ARRIVAL_CITY,
+           SCHED_DEPARTURE_DATE,
+           shed_dept_hour,
+           PAIRING_NO,
+           PAIRING_DATE) %>% 
+  filter(DEADHEAD == "C",
+         updated_dt == max(updated_dt)) %>% 
+  mutate(temp_id = cur_group_id(), .after = CREW_INDICATOR) %>%
+  filter(!duplicated(temp_id)) #%>%
+  # ungroup() %>% #comment out
+  # select(PAIRING_NO, PAIRING_DATE, FLIGHT_NO, SCHED_DEPARTURE_DATE, SCHED_ARRIVAL_DATE, DEPARTING_CITY, ARRIVAL_CITY, # Comment out
+  #       PAIRING_POSITION, SCHED_BLOCK, EST_BLOCK, ACT_BLOCK_RAW, SCHED_BLOCK_CO, EST_BLOCK_CO, ACT_BLOCK_CO)
+
+rm(view_flightleg)
+gc()
+```
+
+
+## Join flight history on flight leg
+```{r}
+
+correct_fh <- clean_flighthistory %>% 
+  inner_join(flight_leg_join, by = join_by(FLIGHT_NO, DEPARTING_CITY, ARRIVAL_CITY, SCHED_DEPARTURE_DATE, SCHED_ARRIVAL_DATE),
+            relationship = "many-to-many")
+
+
+```
+
+## Crew_id by pairing
+```{r}
+
+# MasterPairing Query
+q_masterpairing <- "SELECT *
+                    FROM CT_MASTER_PAIRING WHERE PAIRING_DATE BETWEEN '2018-12-25' AND '2024-09-23';"
+fetch_data(q_masterpairing, "view_masterpairing")
+
+
+join_masterpairing <- view_masterpairing %>% 
+    mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep = " ")) %>% 
+    relocate(updated_dt, .after=PAIRING_NO) %>%
+    group_by(CREW_ID, PAIRING_DATE) %>% 
+    filter(PAIRING_STATUS == "A",
+           updated_dt == max(updated_dt)) #%>% 
+  # select(PAIRING_POSITION, CREW_ID, PAIRING_NO, PAIRING_DATE, CREW_INDICATOR, updated_dt) %>% # comment out
+  # ungroup()
+  
+rm(view_masterpairing)
+gc()
+```
+
+
+## 99% Final Pairing - int island problem
+```{r}
+
+
+int_prob_final_pairing <- correct_fh %>% 
+  inner_join(join_masterpairing, by = join_by(PAIRING_NO, PAIRING_DATE, PAIRING_POSITION),
+            relationship = "many-to-many") %>% 
+  relocate(c(PAIRING_NO:CREW_ID), .before = FLIGHT_NO) %>% 
+  #drop_na(CREW_ID) %>% 
+  filter(!CREW_ID %in% c("6", "8", "10", "11", "35", "21", "7", "18", "1", "2", "3",
+                         "4", "5", "9", "12", "13", "14", "15", "17", "19", "20", "25",
+                         "31", "32", "33", "34", "36", "37")) %>% 
+  group_by(PAIRING_POSITION, PAIRING_NO, DEPARTING_CITY, ARRIVAL_CITY, SCHED_DEPARTURE_DATE, SCHED_DEPARTURE_TIME.x, PAIRING_DATE, # add to dept time .x
+           CREW_ID) %>% 
+  mutate(temp_id = cur_group_id()) %>% 
+  filter(!duplicated(temp_id))
+
+
+```
+
+## Conditional func for int island problem - Final Pairing
+```{r}
+
+final_pairing <- int_prob_final_pairing %>%
+  mutate(filter_group = case_when(EQUIPMENT == "717" & CREW_INDICATOR == "P" ~ "int_717_p",
+                                  EQUIPMENT == "717" & CREW_INDICATOR == "FA" ~ "fa_717",
+                                  TRUE ~ "all_other_craft")) %>%
+  group_by(PAIRING_POSITION, PAIRING_NO, DEPARTING_CITY, 
+           ARRIVAL_CITY, SCHED_DEPARTURE_DATE, 
+           SCHED_DEPARTURE_TIME.x, PAIRING_DATE, # add to sched departure time .x
+           filter_group) %>%
+  filter(
+    (filter_group == "int_717_p" & updated_dt == max(updated_dt)) |
+    (filter_group != "int_717_p")) %>%
+  ungroup() %>%
+  select(!c(filter_group, temp_id)) %>% 
+  group_by(PAIRING_NO, PAIRING_DATE, PAIRING_POSITION, CREW_ID, FLIGHT_NO, FLIGHT_DATE.x, DEPARTING_CITY, # add to flight data .x
+           ARRIVAL_CITY, SCHED_DEPARTURE_DATE) %>% 
+  mutate(temp_id = cur_group_id()) %>% 
+  filter(!duplicated(temp_id)) %>% 
+  select(!c(temp_id, updated_dt)) %>% 
+  select(!c(CREW_INDICATOR.x, updated_dt.y, updated_dt.x, SCHED_DEPARTURE_TIME.y,
+            SCHED_DEPARTURE_GMT_VAR.y, SCHED_ARRIVAL_TIME.y, SCHED_ARRIVAL_GMT_VAR.y, UPDATED_BY.y, UPDATED_BY.x,
+            UPDATE_DATE.y, UPDATE_DATE.x, UPDATE_TIME.y, UPDATE_TIME.x, temp_id.x, temp_id.y, UNIQUE_ID,
+            DEADHEAD, FLIGHT_DATE.x, UPDATED_BY, UPDATE_DATE, UPDATE_TIME, CREW_INDICATOR)) %>% 
+  ungroup() %>% 
+  select(!FLIGHT_DATE.x) %>% 
+  rename(SCHED_DEPARTURE_TIME=SCHED_DEPARTURE_TIME.x,
+         SCHED_DEPARTURE_GMT_VAR=SCHED_DEPARTURE_GMT_VAR.x,
+         SCHED_ARRIVAL_TIME = SCHED_ARRIVAL_TIME.x,
+         SCHED_ARRIVAL_GMT_VAR = SCHED_ARRIVAL_GMT_VAR.x,
+         FLIGHT_DATE=FLIGHT_DATE.y,
+         CREW_INDICATOR=CREW_INDICATOR.y) %>% 
+  relocate(c(CREW_ID, CREW_INDICATOR), .after = PAIRING_DATE) %>% 
+  relocate(c(PAIRING_POSITION, FLIGHT_NO, FLIGHT_DATE, DEPARTING_CITY, ARRIVAL_CITY, SCHED_DEPARTURE_DATE, SCHED_DEPARTURE_TIME,
+             SCHED_ARRIVAL_DATE, SCHED_ARRIVAL_TIME, EQUIPMENT, EQUIPMENT_CODE, FIN_NO), .after=PAIRING_DATE)
+
+
+Cols_AllMissing <- function(final_pairing){ # helper function
+  as.vector(which(colSums(is.na(final_pairing)) == nrow(final_pairing)))
+}
+
+
+
+final_pairing <- final_pairing %>%
+  select(-Cols_AllMissing(.))
+
+```
+
+
+
+
+## loop to write table
+```{r}
+
+### Connect to `PLAYGROUND` Database
+tryCatch({
+    db_connection_pg <- DBI::dbConnect(odbc::odbc(),
+                             Driver="SnowflakeDSIIDriver",
+                             Server="hawaiianair.west-us-2.azure.snowflakecomputing.com",
+                             WAREHOUSE="DATA_LAKE_READER",
+                             Database="PLAYGROUND",
+                             UID= Sys.getenv("UID"),
+                             authenticator = "externalbrowser")
+    print("Database Connected!")
+    },
+    error=function(cond) {
+            print("Unable to connect to Database.")
+})
+
+
+# Set search_path
+dbExecute(db_connection_pg, "USE SCHEMA CREW_ANALYTICS")
+
+
+dbWriteTable(db_connection_pg, "AA_FINAL_PAIRING", final_pairing, overwrite = T)
+
+
+# library(dtplyr)
+# 
+# lazy_final_pairing <- final_pairing %>% 
+#   ungroup() %>% 
+#   mutate(CREW_ID = as.numeric(CREW_ID)) 
+# 
+# lazy_dt(lazy_final_pairing)
+# 
+# 
+# CREW_ID <- unique(lazy_final_pairing$CREW_ID)
+# 
+# for(i in seq_along(index)){
+#   
+#   final_pairing_int <- lazy_final_pairing %>% 
+#     filter(CREW_ID == CREW_ID[i]) %>% 
+#     as.data.frame()
+#   
+#   dbWriteTable(db_connection_pg, "AA_Final_Pairing", final_pairing_int, append = T)
+#   
+#   print(paste("completed", CREW_ID[i], sep = " "))
+#   
+# }
+# 
+# 
+a <- dbGetQuery(db_connection_pg, "SELECT * FROM AA_FINAL_PAIRING;")
+
+
+
+```
