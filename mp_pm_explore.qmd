@@ -58,7 +58,7 @@ fetch_data <- function(query, var_name) {
 ```{r}
 
 q_flighthistory <- "SELECT *
-                    FROM CT_FLIGHT_HISTORY WHERE FLIGHT_DATE BETWEEN '2019-01-01' AND '2024-09-23';"
+                    FROM CT_FLIGHT_HISTORY WHERE FLIGHT_DATE BETWEEN '2019-01-01' AND '2024-09-27';"
 
 fetch_data(q_flighthistory, "view_flighthistory")
 
@@ -87,7 +87,7 @@ gc()
 ```{r}
 
 q_flightleg <- "SELECT *
-                FROM CT_FLIGHT_LEG WHERE PAIRING_DATE BETWEEN '2018-12-25' AND '2024-09-23';"
+                FROM CT_FLIGHT_LEG WHERE PAIRING_DATE BETWEEN '2018-12-25' AND '2024-09-27';"
 
 fetch_data(q_flightleg, "view_flightleg")
 
@@ -132,7 +132,7 @@ correct_fh <- clean_flighthistory %>%
 
 # MasterPairing Query
 q_masterpairing <- "SELECT *
-                    FROM CT_MASTER_PAIRING WHERE PAIRING_DATE BETWEEN '2018-12-25' AND '2024-09-23';"
+                    FROM CT_MASTER_PAIRING WHERE PAIRING_DATE BETWEEN '2018-12-25' AND '2024-09-27';"
 fetch_data(q_masterpairing, "view_masterpairing")
 
 
@@ -170,6 +170,24 @@ int_prob_final_pairing <- correct_fh %>%
 
 ```
 
+
+
+## Get Base from master_schedule
+```{r}
+# MasterPairing Query
+q_masterschedule <- "SELECT *
+                    FROM CT_MASTER_SCHEDULE WHERE BID_DATE BETWEEN '2018-12' AND '2024-09';"
+
+fetch_data(q_masterschedule, "view_masterschedule")
+
+clean_base <- view_masterschedule %>% 
+  select(CREW_ID, BID_DATE, BASE) %>% 
+  distinct()
+
+
+```
+
+
 ## Conditional func for int island problem - Final Pairing
 ```{r}
 
@@ -205,8 +223,10 @@ final_pairing <- int_prob_final_pairing %>%
          CREW_INDICATOR=CREW_INDICATOR.y) %>% 
   relocate(c(CREW_ID, CREW_INDICATOR), .after = PAIRING_DATE) %>% 
   relocate(c(PAIRING_POSITION, FLIGHT_NO, FLIGHT_DATE, DEPARTING_CITY, ARRIVAL_CITY, SCHED_DEPARTURE_DATE, SCHED_DEPARTURE_TIME,
-             SCHED_ARRIVAL_DATE, SCHED_ARRIVAL_TIME, EQUIPMENT, EQUIPMENT_CODE, FIN_NO), .after=PAIRING_DATE)
-
+             SCHED_ARRIVAL_DATE, SCHED_ARRIVAL_TIME, EQUIPMENT, EQUIPMENT_CODE, FIN_NO), .after=PAIRING_DATE) %>% 
+  mutate(BID_DATE = format(PAIRING_DATE, "%Y-%m")) %>% 
+  left_join(clean_base, by = c("CREW_ID", "BID_PERIOD" = "BID_DATE")) %>% 
+  relocate(BASE, .before = CREW_ID)
 
 Cols_AllMissing <- function(final_pairing){ # helper function
   as.vector(which(colSums(is.na(final_pairing)) == nrow(final_pairing)))
@@ -218,6 +238,8 @@ final_pairing <- final_pairing %>%
   select(-Cols_AllMissing(.))
 
 ```
+
+
 
 
 
