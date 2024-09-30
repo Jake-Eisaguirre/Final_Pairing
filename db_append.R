@@ -1,6 +1,8 @@
 # Print a message to indicate the script has started
 print("Script is starting...")
 
+source(here("funcs.R"))
+
 # Set current date variables
 current_date <- Sys.Date()  # Today's date
 week_prior <- current_date - 3  # Date three days prior
@@ -117,28 +119,49 @@ fetch_data(q_masterschedule, "view_masterschedule")
 clean_base <- view_masterschedule %>%
   select(CREW_ID, BID_DATE, BASE) %>%
   distinct() %>% 
-  filter(!CREW_ID %in% c("6", "8", "10", "11", "35", "21", "7", "18", "1", "2", "3", "4", "5", "9", "12", "13", "14", "15", "17", "19", "20", "25", "31", "32", "33", "34", "36", "37")) %>%
+  filter(!CREW_ID %in% c("6", "8", "10", "11", "35", "21", "7", "18", "1", "2", "3", "4", "5", "9", "12", "13", "14", "15", "17", "19", "20", "25", "31", "32", "33", "34", "36", "37"))
 
   
-Cols_AllMissing <- function(final_pairing){ # helper function
-    as.vector(which(colSums(is.na(final_pairing)) == nrow(final_pairing)))
-  }
 
 
 # Finalize the pairing by joining with clean base, removing unnecessary columns
-final_pairing <- int_prob_final_pairing %>%
+  final_pairing <- int_prob_final_pairing %>%
   mutate(filter_group = case_when(EQUIPMENT == "717" & CREW_INDICATOR == "P" ~ "int_717_p",
                                   EQUIPMENT == "717" & CREW_INDICATOR == "FA" ~ "fa_717",
                                   TRUE ~ "all_other_craft")) %>%
-  group_by(PAIRING_POSITION, PAIRING_NO, DEPARTING_CITY, ARRIVAL_CITY, SCHED_DEPARTURE_DATE, SCHED_DEPARTURE_TIME.x, PAIRING_DATE, filter_group) %>%
-  filter((filter_group == "int_717_p" & updated_dt == max(updated_dt)) | (filter_group != "int_717_p")) %>%
+  group_by(PAIRING_POSITION, PAIRING_NO, DEPARTING_CITY, 
+           ARRIVAL_CITY, SCHED_DEPARTURE_DATE, 
+           SCHED_DEPARTURE_TIME.x, PAIRING_DATE, # add to sched departure time .x
+           filter_group) %>%
+  filter(
+    (filter_group == "int_717_p" & updated_dt == max(updated_dt)) |
+      (filter_group != "int_717_p")) %>%
   ungroup() %>%
-  select(!c(filter_group, temp_id)) %>%
-  group_by(PAIRING_NO, PAIRING_DATE, PAIRING_POSITION, CREW_ID, FLIGHT_NO, FLIGHT_DATE.x, DEPARTING_CITY, ARRIVAL_CITY, SCHED_DEPARTURE_DATE) %>%
-  mutate(temp_id = cur_group_id()) %>%
-  filter(!duplicated(temp_id)) %>%
-  select(!c(temp_id, updated_dt)) %>%
-  select(-Cols_AllMissing(.))
+  select(!c(filter_group, temp_id)) %>% 
+  group_by(PAIRING_NO, PAIRING_DATE, PAIRING_POSITION, CREW_ID, FLIGHT_NO, FLIGHT_DATE.x, DEPARTING_CITY, # add to flight data .x
+           ARRIVAL_CITY, SCHED_DEPARTURE_DATE) %>% 
+  mutate(temp_id = cur_group_id()) %>% 
+  filter(!duplicated(temp_id)) %>% 
+  select(!c(temp_id, updated_dt)) %>% 
+  select(!c(CREW_INDICATOR.x, updated_dt.y, updated_dt.x, SCHED_DEPARTURE_TIME.y,
+            SCHED_DEPARTURE_GMT_VAR.y, SCHED_ARRIVAL_TIME.y, SCHED_ARRIVAL_GMT_VAR.y, UPDATED_BY.y, UPDATED_BY.x,
+            UPDATE_DATE.y, UPDATE_DATE.x, UPDATE_TIME.y, UPDATE_TIME.x, temp_id.x, temp_id.y, UNIQUE_ID,
+            DEADHEAD, FLIGHT_DATE.x, UPDATED_BY, UPDATE_DATE, UPDATE_TIME, CREW_INDICATOR)) %>% 
+  ungroup() %>% 
+  select(!FLIGHT_DATE.x) %>% 
+  rename(SCHED_DEPARTURE_TIME=SCHED_DEPARTURE_TIME.x,
+         SCHED_DEPARTURE_GMT_VAR=SCHED_DEPARTURE_GMT_VAR.x,
+         SCHED_ARRIVAL_TIME = SCHED_ARRIVAL_TIME.x,
+         SCHED_ARRIVAL_GMT_VAR = SCHED_ARRIVAL_GMT_VAR.x,
+         FLIGHT_DATE=FLIGHT_DATE.y,
+         CREW_INDICATOR=CREW_INDICATOR.y) %>% 
+  relocate(c(CREW_ID, CREW_INDICATOR), .after = PAIRING_DATE) %>% 
+  relocate(c(PAIRING_POSITION, FLIGHT_NO, FLIGHT_DATE, DEPARTING_CITY, ARRIVAL_CITY, SCHED_DEPARTURE_DATE, SCHED_DEPARTURE_TIME,
+             SCHED_ARRIVAL_DATE, SCHED_ARRIVAL_TIME, EQUIPMENT, EQUIPMENT_CODE, FIN_NO), .after=PAIRING_DATE)%>%
+    select(-Cols_AllMissing(.))
+
+
+
 
 # Connect to the `PLAYGROUND` database and append data if necessary
 tryCatch({
