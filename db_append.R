@@ -1,7 +1,7 @@
 # Print a message to indicate the script has started
 print("Script is starting...")
 
-source(here("funcs.R"))
+
 
 # Set current date variables
 current_date <- Sys.Date()  # Today's date
@@ -16,6 +16,8 @@ if (!require(librarian)) {
 
 # Use librarian to manage and load packages
 librarian::shelf(tidyverse, here, DBI, odbc)  # Load required packages
+
+source(here("funcs.R"))
 
 ### Database Connection: Connect to `ENTERPRISE` database using Snowflake
 tryCatch({
