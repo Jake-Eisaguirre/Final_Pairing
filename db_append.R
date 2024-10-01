@@ -200,8 +200,9 @@ dbAppendTable(db_connection_pg, "AA_FINAL_PAIRING", final_append)
 
 # Print the number of rows added and a success message
 print(paste(nrow(final_append), "rows added"))
-Sys.sleep(10)  # Pause for 10 seconds
+Sys.sleep(5)  # Pause for 10 seconds
 print("Script finished successfully!")
+Sys.sleep(10)  # Pause for 10 seconds
 
 # End of script
 # 
