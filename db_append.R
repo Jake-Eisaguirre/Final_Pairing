@@ -116,7 +116,7 @@ int_prob_final_pairing <- correct_fh %>%
 
 # Query master schedule data and clean it
 q_masterschedule <- "SELECT * FROM CT_MASTER_SCHEDULE WHERE BID_DATE BETWEEN '2018-12' AND '2024-09';"
-fetch_data(q_masterschedule, "view_masterschedule")
+view_masterschedule <- dbGetQuery(db_connection, q_masterschedule)
 
 clean_base <- view_masterschedule %>%
   select(CREW_ID, BID_DATE, BASE) %>%
@@ -124,6 +124,9 @@ clean_base <- view_masterschedule %>%
   filter(!CREW_ID %in% c("6", "8", "10", "11", "35", "21", "7", "18", "1", "2", "3", "4", "5", "9", "12", "13", "14", "15", "17", "19", "20", "25", "31", "32", "33", "34", "36", "37"))
 
   
+Cols_AllMissing <- function(final_pairing){ # helper function
+  as.vector(which(colSums(is.na(final_pairing)) == nrow(final_pairing)))
+}
 
 
 # Finalize the pairing by joining with clean base, removing unnecessary columns

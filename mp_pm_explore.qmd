@@ -57,8 +57,10 @@ fetch_data <- function(query, var_name) {
 ## Flight History
 ```{r}
 
+#'2019-01-01' AND '2024-09-27';"
+
 q_flighthistory <- "SELECT *
-                    FROM CT_FLIGHT_HISTORY WHERE FLIGHT_DATE BETWEEN '2019-01-01' AND '2024-09-27';"
+                    FROM CT_FLIGHT_HISTORY WHERE FLIGHT_DATE BETWEEN '2024-08-01' AND '2024-08-31';"
 
 fetch_data(q_flighthistory, "view_flighthistory")
 
@@ -85,17 +87,19 @@ gc()
 
 ## Flight leg
 ```{r}
+#'2018-12-25' AND '2024-09-27';"
 
 q_flightleg <- "SELECT *
-                FROM CT_FLIGHT_LEG WHERE PAIRING_DATE BETWEEN '2018-12-25' AND '2024-09-27';"
+                FROM CT_FLIGHT_LEG WHERE PAIRING_DATE BETWEEN '2024-07-25' AND '2024-08-31';"
 
 fetch_data(q_flightleg, "view_flightleg")
 
 
 flight_leg_join <-  view_flightleg %>% 
   mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep= " "),
+         #DEADHEAD = if_else(is.na(DEADHEAD), "C", DEADHEAD), V2.0 adjustment to get all only NA deadhead
          shed_dept_hour = hour(SCHED_DEPARTURE_TIME),
-         DEADHEAD = if_else(is.na(DEADHEAD), "C", DEADHEAD)) %>%
+         ) %>%
   relocate(updated_dt, .after=PAIRING_NO) %>%
   group_by(PAIRING_POSITION,
            DEPARTING_CITY,
@@ -104,7 +108,7 @@ flight_leg_join <-  view_flightleg %>%
            shed_dept_hour,
            PAIRING_NO,
            PAIRING_DATE) %>% 
-  filter(DEADHEAD == "C",
+  filter(is.na(DEADHEAD), #V2.0 adjustment to get all only NA deadhead
          updated_dt == max(updated_dt)) %>% 
   mutate(temp_id = cur_group_id(), .after = CREW_INDICATOR) %>%
   filter(!duplicated(temp_id)) #%>%
@@ -132,18 +136,35 @@ correct_fh <- clean_flighthistory %>%
 
 # MasterPairing Query
 q_masterpairing <- "SELECT *
-                    FROM CT_MASTER_PAIRING WHERE PAIRING_DATE BETWEEN '2018-12-25' AND '2024-09-27';"
+                    FROM CT_MASTER_PAIRING WHERE PAIRING_DATE BETWEEN '2024-07-25' AND '2024-08-31';"
 fetch_data(q_masterpairing, "view_masterpairing")
 
+join_masterpairing <- view_masterpairing %>%
+  mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep = " ")) %>%
+  group_by(PAIRING_DATE, CREW_ID) %>%
+  filter(PAIRING_STATUS == "A",
+         updated_dt == max(updated_dt)) %>%
+  ungroup() %>%
+  group_by(PAIRING_DATE, PAIRING_NO, PAIRING_POSITION) %>%
+  filter(
+    # For CA, FO, and RO, keep only the employee with the latest updated_dt
+    (PAIRING_POSITION %in% c("CA", "FO", "RO") & updated_dt == max(updated_dt)) |
+    # For FA, allow multiple employees
+    (PAIRING_POSITION %in% c("FA", "JL", "KS", "JS", "LP", "KL"))
+  ) %>%
+  ungroup()
 
-join_masterpairing <- view_masterpairing %>% 
-    mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep = " ")) %>% 
-    relocate(updated_dt, .after=PAIRING_NO) %>%
-    group_by(CREW_ID, PAIRING_DATE) %>% 
-    filter(PAIRING_STATUS == "A",
-           updated_dt == max(updated_dt)) #%>% 
-  # select(PAIRING_POSITION, CREW_ID, PAIRING_NO, PAIRING_DATE, CREW_INDICATOR, updated_dt) %>% # comment out
-  # ungroup()
+
+
+
+# join_masterpairing <- view_masterpairing %>% 
+#     mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep = " ")) %>% 
+#     relocate(updated_dt, .after=PAIRING_NO) %>%
+#     group_by(CREW_ID, PAIRING_DATE) %>% 
+#     filter(PAIRING_STATUS == "A",
+#            updated_dt == max(updated_dt)) #%>% 
+#   # select(PAIRING_POSITION, CREW_ID, PAIRING_NO, PAIRING_DATE, CREW_INDICATOR, updated_dt) %>% # comment out
+#   # ungroup()
   
 rm(view_masterpairing)
 gc()
@@ -236,6 +257,10 @@ Cols_AllMissing <- function(final_pairing){ # helper function
 
 final_pairing <- final_pairing %>%
   select(-Cols_AllMissing(.))
+
+t <- final_pairing %>% 
+  group_by(FLIGHT_DATE, PAIRING_POSITION, FLIGHT_NO) %>% 
+  reframe(n = n())
 
 ```
 
