@@ -115,10 +115,10 @@ int_prob_final_pairing <- correct_fh %>%
 q_masterschedule <- "SELECT * FROM CT_MASTER_SCHEDULE WHERE BID_DATE BETWEEN '2018-12' AND '2024-09';"  # SQL query to fetch master schedule data
 view_masterschedule <- dbGetQuery(db_connection, q_masterschedule)  # Execute the query and store the results
 
-clean_base <- view_masterschedule %>%
-  select(CREW_ID, BID_DATE, BASE) %>%  # Select relevant columns
-  distinct() %>%  # Remove duplicate rows
-  filter(!CREW_ID %in% c("6", "8", "10", "11", "35", "21", "7", "18", "1", "2", "3", "4", "5", "9", "12", "13", "14", "15", "17", "19", "20", "25", "31", "32", "33", "34", "36", "37"))  # Exclude specific crew IDs
+# clean_base <- view_masterschedule %>%
+#   select(CREW_ID, BID_DATE, BASE) %>%  # Select relevant columns
+#   distinct() %>%  # Remove duplicate rows
+#   filter(!CREW_ID %in% c("6", "8", "10", "11", "35", "21", "7", "18", "1", "2", "3", "4", "5", "9", "12", "13", "14", "15", "17", "19", "20", "25", "31", "32", "33", "34", "36", "37"))  # Exclude specific crew IDs
 
 # Define a helper function to identify columns with all missing values
 Cols_AllMissing <- function(final_pairing) {  # Function to find columns with all NA values

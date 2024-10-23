@@ -71,7 +71,7 @@ clean_flighthistory <- view_flighthistory %>%  # Start processing the fetched fl
   group_by(FLIGHT_NO, FLIGHT_DATE, DEPARTING_CITY, ARRIVAL_CITY, SCHED_DEPARTURE_TIME) %>%  # Group by multiple columns
   filter(updated_dt == max(updated_dt)) %>%  # Keep only the latest update for each group
   mutate(temp_id = cur_group_id()) %>%  # Create a temporary ID for each group
-  filter(!duplicated(temp_id)) %>%  # Remove duplicate rows based on temporary ID
+  filter(!duplicated(temp_id)) #%>%  # Remove duplicate rows based on temporary ID
   # select(!c(12:16)) %>% # comment out
   # select(!c(5:7)) %>%  # comment out
   # select(!c(10:11)) # comment out
@@ -107,7 +107,7 @@ flight_leg_join <-  view_flightleg %>%  # Start processing the fetched flight le
   filter(is.na(DEADHEAD),  # Keep only rows where DEADHEAD is NA
          updated_dt == max(updated_dt)) %>%  # Keep only the latest update for each group
   mutate(temp_id = cur_group_id(), .after = CREW_INDICATOR) %>%  # Create a temporary ID for each group
-  filter(!duplicated(temp_id)) %>%  # Remove duplicate rows based on temporary ID
+  filter(!duplicated(temp_id)) #%>%  # Remove duplicate rows based on temporary ID
   # ungroup() %>% # comment out
   # select(PAIRING_NO, PAIRING_DATE, FLIGHT_NO, SCHED_DEPARTURE_DATE, SCHED_ARRIVAL_DATE, DEPARTING_CITY, ARRIVAL_CITY, # Comment out
   #       PAIRING_POSITION, SCHED_BLOCK, EST_BLOCK, ACT_BLOCK_RAW, SCHED_BLOCK_CO, EST_BLOCK_CO, ACT_BLOCK_CO)
@@ -137,35 +137,36 @@ q_masterpairing <- "SELECT *
 
 fetch_data(q_masterpairing, "view_masterpairing")  # Fetch master pairing data and store it in 'view_masterpairing'
 
-join_masterpairing <- view_masterpairing %>%  # Start processing the fetched master pairing data
-  mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep = " ")) %>%  # Create a new datetime column
-  group_by(PAIRING_DATE, CREW_ID) %>%  # Group by pairing date and crew ID
-  filter(PAIRING_STATUS == "A",  # Filter for active pairings
-         updated_dt == max(updated_dt)) %>%  # Keep only the latest update for each group
-  ungroup() %>%  # Ungroup to return to a flat data frame
-  group_by(PAIRING_DATE, PAIRING_NO, PAIRING_POSITION) %>%  # Group again for further filtering
-  filter(
-    # For CA, FO, and RO, keep only the employee with the latest updated_dt
-    (PAIRING_POSITION %in% c("CA", "FO", "RO") & updated_dt == max(updated_dt)) |  # Keep the latest for specific positions
-    # For FA, allow multiple employees
-    (PAIRING_POSITION %in% c("FA", "JL", "KS", "JS", "LP", "KL"))  # Allow multiple for flight attendants
-  ) %>%
-  ungroup()  # Ungroup to return to a flat data frame
+# join_masterpairing <- view_masterpairing %>%  # Start processing the fetched master pairing data
+#   mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep = " ")) %>%  # Create a new datetime column
+#   group_by(PAIRING_DATE, CREW_ID) %>%  # Group by pairing date and crew ID
+#   filter(PAIRING_STATUS == "A",  # Filter for active pairings
+#          updated_dt == max(updated_dt)) %>%  # Keep only the latest update for each group
+#   ungroup() %>%  # Ungroup to return to a flat data frame
+#   group_by(PAIRING_DATE, PAIRING_NO, PAIRING_POSITION) %>%  # Group again for further filtering
+#   filter(
+#     # For CA, FO, and RO, keep only the employee with the latest updated_dt
+#     (PAIRING_POSITION %in% c("CA", "FO", "RO") & updated_dt == max(updated_dt)) |  # Keep the latest for specific positions
+#     # For FA, allow multiple employees
+#     (PAIRING_POSITION %in% c("FA", "JL", "KS", "JS", "LP", "KL"))  # Allow multiple for flight attendants
+#   ) %>%
+#   ungroup()  # Ungroup to return to a flat data frame
+# 
 
+
+join_masterpairing <- view_masterpairing %>%
+    mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep = " ")) %>%
+    relocate(updated_dt, .after=PAIRING_NO) %>%
+    group_by(CREW_ID, PAIRING_DATE) %>%
+    filter(PAIRING_STATUS == "A",
+           updated_dt == max(updated_dt)) #%>%
+  # select(PAIRING_POSITION, CREW_ID, PAIRING_NO, PAIRING_DATE, CREW_INDICATOR, updated_dt) %>% # comment out
+  # ungroup()
+
+  
 rm(view_masterpairing)  # Remove the 'view_masterpairing' variable to free up memory
 gc()  # Trigger garbage collection to clean up memory
 
-
-
-# join_masterpairing <- view_masterpairing %>% 
-#     mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep = " ")) %>% 
-#     relocate(updated_dt, .after=PAIRING_NO) %>%
-#     group_by(CREW_ID, PAIRING_DATE) %>% 
-#     filter(PAIRING_STATUS == "A",
-#            updated_dt == max(updated_dt)) #%>% 
-#   # select(PAIRING_POSITION, CREW_ID, PAIRING_NO, PAIRING_DATE, CREW_INDICATOR, updated_dt) %>% # comment out
-#   # ungroup()
-  
 
 ```
 
@@ -255,9 +256,43 @@ Cols_AllMissing <- function(final_pairing) {  # Define a helper function to find
 final_pairing <- final_pairing %>%  # Start with final pairing data
   select(-Cols_AllMissing(.))  # Remove columns that are entirely NA
 
-t <- final_pairing %>%  # Create a summary table
-  group_by(FLIGHT_DATE, PAIRING_POSITION, FLIGHT_NO) %>%  # Group by flight date, pairing position, and flight number
-  reframe(n = n())  # Count the number of occurrences in each group
+# t <- final_pairing %>%  # Create a summary table
+#   group_by(FLIGHT_DATE, PAIRING_POSITION, FLIGHT_NO) %>%  # Group by flight date, pairing position, and flight number
+#   reframe(n = n())  # Count the number of occurrences in each group
+
+```
+
+
+## Search for codes to remove false actives
+```{r}
+
+master_history_q <- "select CREW_INDICATOR, CREW_ID, BID_PERIOD, TRANSACTION_CODE, PAIRING_NO, PAIRING_DATE, TO_DATE, PAIRING_POSITION, PRIOR_TXN_CODE,
+                     UPDATE_DATE, UPDATE_TIME
+                     FROM CT_MASTER_HISTORY
+                     WHERE PAIRING_DATE BETWEEN '2024-07-25' AND '2024-08-31';"
+
+fetch_data(master_history_q, 'view_masterhistory')
+
+false_active_emp <- view_masterhistory %>% 
+  mutate(updated_dt = paste(UPDATE_DATE, UPDATE_TIME, sep= " ")) %>% 
+  group_by(CREW_ID, PAIRING_POSITION, PAIRING_DATE) %>% 
+  filter(updated_dt == max(updated_dt)) %>% 
+  #mutate(temp_id = cur_group_id()) %>% 
+  filter(#!duplicated(temp_id),
+         TRANSACTION_CODE %in% c("DRP", "FAR", "REM", "RFU"))
+
+rm(view_masterhistory)
+gc()
+
+```
+
+## Test anti join
+```{r}
+
+t <- anti_join(false_active_emp, final_pairing, by = c("PAIRING_DATE", "PAIRING_POSITION", "CREW_ID")) %>% 
+  group_by(PAIRING_POSITION, CREW_ID, PAIRING_DATE) %>% 
+  mutate(temp_id = cur_group_id()) %>% 
+  filter(!duplicated(temp_id))
 
 ```
 
