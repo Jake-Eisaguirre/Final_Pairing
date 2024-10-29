@@ -2,9 +2,9 @@
 print("Script is starting...")
 
 # Set current date variables
-current_date <- Sys.Date()  # Get today's date
-week_prior <- current_date - 3  # Calculate the date three days prior
-week_prior_pairing_date <- current_date - 7  # Calculate the date seven days prior
+current_date <- Sys.Date() + 30  # Get today's date
+week_prior <- current_date - 33  # Calculate the date three days prior
+week_prior_pairing_date <- current_date - 37  # Calculate the date seven days prior
 
 # Ensure the 'librarian' package is installed and loaded
 if (!require(librarian)) {
